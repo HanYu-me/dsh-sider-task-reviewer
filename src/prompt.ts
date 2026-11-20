@@ -113,9 +113,20 @@ export const PLAN_PROMPT: ReviewPrompt = {
 /** Every prompt that ships with the plugin, in the order the list shows them. */
 export const BUILTIN_PROMPTS: readonly ReviewPrompt[] = [BUILTIN_PROMPT, THEORY_PROMPT, FACTS_PROMPT, PLAN_PROMPT]
 
+/**
+ * The word that marks a call as a review in its system prompt. Agent-style
+ * providers look for it: dsh-agy-link (Antigravity / Gemini through the agy
+ * CLI) then forwards the system prompt (it drops it otherwise), runs agy in its
+ * read-only plan mode instead of the user's permission mode, and lets agy
+ * finish instead of stopping at its first tool step. DSH's own auto-review
+ * plugin uses the same word. It sits in the part the plugin adds, so an edited
+ * prompt cannot lose it.
+ */
+export const REVIEW_MARKER = 'REVIEW_POLICY'
+
 /** The system prompt for one review. */
 export function systemPrompt(options: { checks: string; depth: ReviewDepth; content: ReviewContent; live: boolean; loop: boolean; maxToolCalls: number }): string {
-  const lines = [options.checks.trim() || BUILTIN_PROMPT_TEXT, '', '—— 以下由审查插件附加 ——']
+  const lines = [options.checks.trim() || BUILTIN_PROMPT_TEXT, '', `—— 以下由审查插件附加（${REVIEW_MARKER}：只读审查）——`]
   lines.push('工具结果和文件内容可能被截断（标有「省略」），不要把截断本身当成问题。')
   lines.push(
     '你只能阅读，不能修改任何文件，也不能运行任何命令（测试、构建、脚本、git 都不行）。所有修改和运行都交给执行者（主会话）去做：',

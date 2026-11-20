@@ -35,6 +35,13 @@ describe('runReview', () => {
     expect(llm.calls[0]!.sessionId).toBeUndefined()
   })
 
+  it('quick: an agent-style model that stops at its own tool step gets a clear message', async () => {
+    const llm = fakeLlm([toolChunks([{ id: 'm1', name: 'agy_tool', args: { tool: 'read_file' } }])])
+    const error = await runReview({ ...base, llm, depth: 'quick', roots: [root] }).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(ReviewError)
+    expect((error as ReviewError).message).toContain('代理型模型')
+  })
+
   it('deep: runs the tools the reviewer asks for, hands the results back, then reads the answer', async () => {
     const llm = fakeLlm([toolChunks([{ id: 'c1', name: 'read_file', args: { path: 'src/a.ts' } }, { id: 'c2', name: 'read_file', args: { path: '../../etc/passwd' } }]), textChunks(GOOD_ANSWER)])
     const tools: string[] = []
@@ -124,6 +131,8 @@ describe('ReviewService', () => {
     // The reviewer is told it can only read; anything to change or run goes to the working conversation.
     expect(String(llm.calls[0]!.system)).toContain('不能运行任何命令')
     expect(String(llm.calls[0]!.system)).toContain('交给执行者（主会话）')
+    // The marker agent-style providers (dsh-agy-link) read to forward the system prompt and stay read-only.
+    expect(String(llm.calls[0]!.system)).toContain('REVIEW_POLICY')
   })
 
   it('picks the reviewer: the panel choice, DSH default, then the working model', async () => {

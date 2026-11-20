@@ -99,6 +99,16 @@ dsh plugin --profile web add github:HanYu-me/dsh-sider-task-reviewer
 - 发送前会隐藏常见的密钥和 token：私钥、GitHub / OpenAI / Slack / AWS / Google key、JWT、Bearer、`password=` 之类。
 - 隐藏了多少，会写在报告备注里。
 
+## 代理型审查模型（Antigravity / Gemini 等）
+
+有些接入 DSH 的模型其实是一个会自己用工具的代理程序，例如 dsh-agy-link 接入的 Antigravity（Gemini 通过 `agy` CLI 运行）。插件在系统提示里带上 `REVIEW_POLICY` 标记，dsh-agy-link 认出这是审查调用后：
+
+- 把审查说明（系统提示）转发给模型；不带标记时它会丢掉系统提示；
+- 用 agy 只读的 plan 模式运行，不用你平时对话的权限模式；
+- 让 agy 直接给出结论，不会在它第一次用工具时就停下。
+
+Antigravity 对这类审查调用固定用 low 思考强度，面板里选的思考强度对它不起作用。
+
 ## 接口（本机）
 
 `/sider-task-reviewer/*`，挂在 DSH 的 Web 服务上：

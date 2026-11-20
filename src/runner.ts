@@ -167,6 +167,10 @@ export async function runReview(input: RunInput): Promise<RunOutput> {
       const text = textOfBlocks(result.blocks)
       if (problem !== undefined && text === '') throw new ReviewError(`审查模型出错：${problem}`, 'upstream')
       if (problem !== undefined) notes.push(problem)
+      // An agent-style provider (it runs its own tools) may stop at its first tool step and hand that back instead of an answer.
+      if (text === '' && result.blocks.some((block) => block.type === 'tool-call')) {
+        throw new ReviewError('审查模型想自己调用工具，没有给出结论：它可能是会自己用工具的代理型模型。换一个审查模型试试', 'empty')
+      }
       if (text === '') throw new ReviewError('审查模型没有给出回答', 'empty')
       return { text, usedDepth: 'quick', tools, notes, redactions }
     }

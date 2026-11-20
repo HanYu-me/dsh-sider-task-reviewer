@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 — 2026-11-20
+
+- **Reviews with Antigravity (Gemini through the agy CLI) work.** They used to end with "审查模型没有给出回答": dsh-agy-link dropped the system prompt and stopped at agy's first tool step, and it ran agy with the user's own permission mode. The system prompt now carries the `REVIEW_POLICY` marker (the word DSH's auto-review plugin uses). dsh-agy-link recognises it, forwards the review instructions, runs agy in its read-only plan mode, and lets it answer. Antigravity pins review calls to low reasoning effort.
+- A quick review that ends at a tool step of an agent-style model says so ("代理型模型") instead of "没有给出回答".
+
 ## 0.1.1 — 2026-11-20
 
 - **Read-only, everything goes through the main conversation.** The plugin and the reviewer never write a file and never run a command: the deep-review `git` tool is gone (deep review keeps `read_file`, `list_dir` and `search`, all plain file reads), search no longer calls `git grep`, the workspace `git status` / `git diff` snapshot is no longer taken, and a file's repository is found by its `.git` folder on disk. The reviewer is told so: whatever needs a change or a command (tests, builds, `git diff`) becomes a suggestion for the main conversation, e.g. "run pytest and paste the output". The message sent to the main conversation says the same. A test fails if any source file can start a process.
