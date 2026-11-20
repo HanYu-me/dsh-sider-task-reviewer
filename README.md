@@ -119,6 +119,8 @@ dsh plugin --profile web add github:HanYu-me/dsh-sider-task-reviewer
 
 Antigravity 对这类审查调用固定用 low 思考强度，面板里选的思考强度对它不起作用。
 
+agy 自己也有读文件等工具，但在只读的 plan 模式下，它读自己文件夹以外的文件会被拒绝，然后直接结束、不给回答。所以插件会告诉审查模型：需要的内容都已在请求里，不要用任何工具。万一还是没有回答，插件会自动再问一次，要求它不用工具直接作答，报告备注里会写明。
+
 ## 接口（本机）
 
 `/sider-task-reviewer/*`，挂在 DSH 的 Web 服务上：

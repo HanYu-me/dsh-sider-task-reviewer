@@ -7,6 +7,7 @@ import { serveReviewer } from '../src/routes'
 import { ReviewError, runReview } from '../src/runner'
 import { DEFAULT_CONFIG, ReviewService, type AgentFace, type HostFaces, type SessionFace } from '../src/service'
 import { createFileStore, createMemoryStore } from '../src/store'
+import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { fakeLlm, GOOD_ANSWER, Log, textChunks, toolChunks } from './fixtures'
 
 let root: string
@@ -33,6 +34,34 @@ describe('runReview', () => {
     expect(llm.calls).toHaveLength(1)
     expect(llm.calls[0]!.tools).toBeUndefined()
     expect(llm.calls[0]!.sessionId).toBeUndefined()
+  })
+
+  it('quick: no answer the first time (an agent model whose own tool was refused) — asked once more, in one message, without tools', async () => {
+    const empty: StreamChunk[] = [{ type: 'finish', reason: { kind: 'stop' } } as StreamChunk]
+    const llm = fakeLlm([empty, textChunks(GOOD_ANSWER)])
+    const out = await runReview({ ...base, llm, depth: 'quick', roots: [root] })
+    expect(out.text).toBe(GOOD_ANSWER)
+    expect(llm.calls).toHaveLength(2)
+    expect(llm.calls[1]!.messages).toHaveLength(1)
+    const asked = JSON.stringify(llm.calls[1]!.messages[0])
+    expect(asked).toContain('P')
+    expect(asked).toContain('不要使用任何工具')
+    expect(out.notes.join('')).toContain('不用工具')
+  })
+
+  it('quick: an agent model that hands back a tool step first answers when asked again', async () => {
+    const llm = fakeLlm([toolChunks([{ id: 'm1', name: 'agy_tool', args: { tool: 'read_file' } }]), textChunks(GOOD_ANSWER)])
+    const out = await runReview({ ...base, llm, depth: 'quick', roots: [root] })
+    expect(out.text).toBe(GOOD_ANSWER)
+  })
+
+  it('deep: no answer and no tool call the first time — asked once more without tools', async () => {
+    const empty: StreamChunk[] = [{ type: 'finish', reason: { kind: 'stop' } } as StreamChunk]
+    const llm = fakeLlm([empty, textChunks(GOOD_ANSWER)])
+    const out = await runReview({ ...base, llm, depth: 'deep', roots: [root] })
+    expect(out.text).toBe(GOOD_ANSWER)
+    expect(llm.calls[1]!.messages).toHaveLength(1)
+    expect(JSON.stringify(llm.calls[1]!.messages[0])).toContain('不要使用任何工具')
   })
 
   it('quick: an agent-style model that stops at its own tool step gets a clear message', async () => {

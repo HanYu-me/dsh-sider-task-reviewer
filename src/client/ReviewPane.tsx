@@ -539,48 +539,62 @@ export function ReviewPane({ sessionId }: { sessionId: string | undefined }) {
   const header: ReactNode = running || loopActive ? <span className="rv-verdict is-running">{loopActive ? '连续审查中' : '审查中'}</span> : latest !== undefined ? <span className={`rv-verdict is-${latest.verdict}`}>{VERDICT_LABELS[latest.verdict]}</span> : null
   const blocked = running || loopActive || starting || !state.live || turns === 0
 
+  const head = (
+          <div className="rv-head">
+            <ShieldIcon size={16} />
+            <h2>任务审查</h2>
+            {header}
+            <span className="rv-spacer" />
+            <div className="rv-views">
+              <button type="button" aria-pressed={view === 'review'} className={view === 'review' ? 'is-on' : ''} onClick={() => setView('review')}>
+                审查
+              </button>
+              <button type="button" aria-pressed={view === 'chat'} className={view === 'chat' ? 'is-on' : ''} onClick={() => setView('chat')}>
+                讨论
+              </button>
+              <button type="button" aria-pressed={view === 'prompts'} className={view === 'prompts' ? 'is-on' : ''} onClick={() => setView('prompts')}>
+                提示词
+              </button>
+            </div>
+            <button type="button" className={'rv-icon-btn' + (showSettings ? ' is-on' : '')} aria-expanded={showSettings} aria-label="审查设置" title="审查设置" onClick={() => setShowSettings(!showSettings)}>
+              <GearIcon />
+            </button>
+          </div>
+  )
+
+  // The discussion fills the panel like the sidebar's side chat: the header stays, the conversation scrolls, the composer sits at the bottom.
+  if (view === 'chat') {
+    return (
+      <div className="rv-root">
+        <div className="rv-chat-top">
+          {head}
+          {showSettings ? <SettingsSection state={state} /> : null}
+          {note !== undefined ? <div className="rv-banner is-info">{note}</div> : null}
+        </div>
+        <ChatView
+          state={state}
+          sessionId={sessionId}
+          catalog={catalog}
+          modelName={route !== undefined ? `${modelName(catalog, route)}${route.effort !== undefined ? ` · ${route.effort}` : ''}` : '跟随 DSH 默认'}
+          onNote={setNote}
+          onOpenReport={(reportId) => {
+            setPicked(reportId)
+            setView('review')
+          }}
+          onPickModel={() => setView('review')}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="rv-root">
       <div className="rv-scroll">
-        <div className="rv-head">
-          <ShieldIcon size={16} />
-          <h2>任务审查</h2>
-          {header}
-          <span className="rv-spacer" />
-          <div className="rv-views">
-            <button type="button" aria-pressed={view === 'review'} className={view === 'review' ? 'is-on' : ''} onClick={() => setView('review')}>
-              审查
-            </button>
-            <button type="button" aria-pressed={view === 'chat'} className={view === 'chat' ? 'is-on' : ''} onClick={() => setView('chat')}>
-              讨论
-            </button>
-            <button type="button" aria-pressed={view === 'prompts'} className={view === 'prompts' ? 'is-on' : ''} onClick={() => setView('prompts')}>
-              提示词
-            </button>
-          </div>
-          <button type="button" className={'rv-icon-btn' + (showSettings ? ' is-on' : '')} aria-expanded={showSettings} aria-label="审查设置" title="审查设置" onClick={() => setShowSettings(!showSettings)}>
-            <GearIcon />
-          </button>
-        </div>
+        {head}
 
         {showSettings ? <SettingsSection state={state} /> : null}
 
-        {view === 'chat' ? (
-          <>
-            {note !== undefined ? <div className="rv-banner is-info">{note}</div> : null}
-            <ChatView
-              state={state}
-              sessionId={sessionId}
-              catalog={catalog}
-              modelName={route !== undefined ? `${modelName(catalog, route)}${route.effort !== undefined ? ` · 思考 ${route.effort}` : ''}` : '跟随 DSH 默认'}
-              onNote={setNote}
-              onOpenReport={(reportId) => {
-                setPicked(reportId)
-                setView('review')
-              }}
-            />
-          </>
-        ) : view === 'prompts' ? (
+        {view === 'prompts' ? (
           <PromptsView
             global={state.global}
             onChanged={() => {

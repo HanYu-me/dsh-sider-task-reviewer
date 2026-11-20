@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4 — 2026-11-20
+
+- **The discussion looks like the sidebar's side chat.** It fills the panel under the header: your messages in bubbles on the right, the reviewer's replies across the width (Markdown: bold, code, lists, code blocks; never HTML), each review as a short line that opens its report, tool use and notes as folding lines, a shimmering status line while it answers, and a rounded composer at the bottom with the model pill, 重新开始 and a round send / stop button. Reply actions are small icon buttons (put into the input box, send directly, copy).
+- **Fix: "审查模型没有给出回答" with Antigravity (Gemini through agy).** The model wanted to read the reviewed files with agy's own tools; in agy's read-only plan mode a read outside its folder is refused, and agy then ends the run without an answer. Reviews and discussions without the plugin's tools now tell the model that everything it needs is in the request and not to use any tools (its own included). If a call still ends without an answer, the plugin asks once more, in the same single message, to answer without tools (one message, because dsh-agy-link may keep only the last user message). The model's thinking running out of room is retried the same way.
+
 ## 0.1.3 — 2026-11-20
 
 - **Reviews of one conversation remember each other.** Every review of a conversation (manual, shield, live, continuous) and the discussion about them go into one record per conversation. Each new review is sent with it: earlier reviews as their conclusions (with what the user did with the findings: waved away, sent to the main conversation), the newest with the material it was given, and the discussion. The reviewer is told to stay consistent: do not report what was fixed again, correct an earlier mistake, take what the user said into account. The record is cut from the oldest end to about 40,000 characters. It goes into the request as one block of text, not as earlier messages, so agent-style providers (dsh-agy-link rebuilds or drops earlier messages by its own rules) read it like every other provider.

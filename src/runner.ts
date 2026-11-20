@@ -13,7 +13,7 @@
  */
 import { BlockAssembler, createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, FinishReason, GenerateOptions, RequestMessage, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { ANSWER_NOW, FINISH_NOW } from './prompt'
+import { ANSWER_NOW, ANSWER_WITHOUT_TOOLS, FINISH_NOW } from './prompt'
 import { addCounts, redact } from './redact'
 import type { ModelRoute, ReviewDepth, ReviewToolUse } from './shared/protocol'
 import { runTool, TOOL_SCHEMAS, toolTarget } from './workspace'
@@ -157,6 +157,8 @@ export async function runReview(input: RunInput): Promise<RunOutput> {
     ...(input.effort !== undefined ? { reasoningEffort: input.effort as GenerateOptions['reasoningEffort'] } : {}),
   }
   const first: RequestMessage = { role: 'user', content: [{ type: 'text', text: input.prompt }] }
+  // Asking again goes into the same, single message: agent-style providers (dsh-agy-link) may keep only the last user message.
+  const again = (nudge: string): RequestMessage => ({ role: 'user', content: [{ type: 'text', text: `${input.prompt}\n\n${nudge}` }] })
   const answerNow = input.answerNow ?? ANSWER_NOW
   const finishNow = input.finishNow ?? FINISH_NOW
   try {
@@ -167,7 +169,12 @@ export async function runReview(input: RunInput): Promise<RunOutput> {
       if (result.finish.kind === 'max-tokens' && textOfBlocks(result.blocks) === '') {
         notes.push('审查模型第一次思考用完了输出长度，已加大额度重试')
         input.onPhase?.('审查模型没写出结论，重试中')
-        result = await streamOnce(input, { ...base, maxTokens: Math.min(input.maxTokens * 2, 64_000), messages: [first, { role: 'user', content: [{ type: 'text', text: answerNow }] }] }, controller.signal)
+        result = await streamOnce(input, { ...base, maxTokens: Math.min(input.maxTokens * 2, 64_000), messages: [again(answerNow)] }, controller.signal)
+      } else if (textOfBlocks(result.blocks) === '' && (result.finish.kind === 'stop' || result.finish.kind === 'tool-calls')) {
+        // An agent-style model stopped at a tool of its own (refused in its read-only mode): once more, without tools.
+        notes.push('第一次没有得到回答（审查模型可能想用自己的工具），已要求它不用工具、直接作答')
+        input.onPhase?.('没有得到回答，重试中')
+        result = await streamOnce(input, { ...base, messages: [again(ANSWER_WITHOUT_TOOLS)] }, controller.signal)
       }
       const problem = describeFinish(result.finish)
       const text = textOfBlocks(result.blocks)
@@ -189,6 +196,7 @@ export async function runReview(input: RunInput): Promise<RunOutput> {
     const messages: RequestMessage[] = [first]
     let calls = 0
     let nudged = false
+    let retried = false
     for (let round = 0; round < input.maxToolCalls + 2; round++) {
       input.onPhase?.(round === 0 ? '等待审查模型（可查看文件）' : '审查模型继续核实')
       let result: CallResult
@@ -213,7 +221,16 @@ export async function runReview(input: RunInput): Promise<RunOutput> {
         if (text === '' && result.finish.kind === 'max-tokens' && !nudged) {
           nudged = true
           notes.push('审查模型思考用完了输出长度，已提示它直接给结论')
-          messages.push({ role: 'user', content: [{ type: 'text', text: answerNow }] })
+          if (messages.length === 1) messages[0] = again(answerNow)
+          else messages.push({ role: 'user', content: [{ type: 'text', text: answerNow }] })
+          continue
+        }
+        if (text === '' && result.finish.kind === 'stop' && !retried) {
+          // An agent-style model uses its own tools instead of these; one refused there ends its run without an answer.
+          retried = true
+          notes.push('第一次没有得到回答（审查模型可能想用自己的工具），已要求它不用工具、直接作答')
+          if (messages.length === 1) messages[0] = again(ANSWER_WITHOUT_TOOLS)
+          else messages.push({ role: 'user', content: [{ type: 'text', text: ANSWER_WITHOUT_TOOLS }] })
           continue
         }
         if (problem !== undefined && text === '') throw new ReviewError(`审查模型出错：${problem}`, 'upstream')

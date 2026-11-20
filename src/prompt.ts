@@ -157,10 +157,22 @@ export function systemPrompt(options: { checks: string; depth: ReviewDepth; cont
       `你可以用只读工具查看工作区来核实（最多 ${options.maxToolCalls} 次）：read_file 读文件，list_dir 列目录，search 搜索文本。它们只读文件，不能运行命令。路径可以写相对工作区的路径，也可以写下面列出的文件的绝对路径。`,
       '先想清楚要核实什么，再调用工具，不要漫无目的地浏览。核实完毕后，直接输出结论。',
     )
+  } else {
+    lines.push(NO_TOOLS)
   }
   lines.push('', '最后只输出一个 JSON 对象，不要输出任何其他文字，不要用代码块包裹。格式：', RESULT_SHAPE)
   return lines.join('\n')
 }
+
+/**
+ * Said when no tools are offered. An agent-style model (Antigravity runs
+ * Gemini inside the agy CLI) has tools of its own; in its read-only mode a
+ * read outside its folder is refused and the run ends without an answer.
+ */
+export const NO_TOOLS = '这次不提供工具：需要看的对话和文件内容都已经在请求里。不要尝试读文件、搜索或运行命令（包括你自己环境里的工具），直接根据请求里的内容作答；看不到、需要核实的，写进结论或建议里。'
+
+/** Asked again, in the same message, when the first call ended without an answer. */
+export const ANSWER_WITHOUT_TOOLS = '（上一次没有得到你的回答，可能是你调用的工具被拒绝了。这次请不要使用任何工具，直接根据上面已有的内容作答。）'
 
 /** The system prompt of the discussion about the reviews. */
 export function chatSystemPrompt(options: { checks: string; tools: boolean; maxToolCalls: number }): string {
@@ -173,6 +185,8 @@ export function chatSystemPrompt(options: { checks: string; tools: boolean; maxT
   )
   if (options.tools) {
     lines.push(`- 需要时可以用只读工具查看工作区（最多 ${options.maxToolCalls} 次）：read_file 读文件，list_dir 列目录，search 搜索文本。它们只读文件，不能运行命令。`)
+  } else {
+    lines.push(`- ${NO_TOOLS}`)
   }
   return lines.join('\n')
 }
