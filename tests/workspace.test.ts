@@ -1,12 +1,12 @@
-import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { homedir } from 'node:os'
 import { filesSection, reviewRoots, touchedFiles } from '../src/files'
 import { turnsOf } from '../src/transcript'
-import { checkGitArgs, insideRoot, insideRoots, looksSecret, runTool, ToolRefusal, workspaceSnapshot } from '../src/workspace'
+import { insideRoot, insideRoots, looksSecret, runTool, TOOL_SCHEMAS, ToolRefusal, workspaceOverview } from '../src/workspace'
 import { Log } from './fixtures'
 
 let root: string
@@ -22,10 +22,8 @@ beforeAll(() => {
   writeFileSync(join(root, '.env'), 'API_KEY=abc')
   writeFileSync(join(root, 'bin.dat'), Buffer.from([0, 1, 2, 3]))
   symlinkSync(join(outside, 'secret.txt'), join(root, 'escape.txt'))
-  execFileSync('git', ['init', '-q'], { cwd: root })
-  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'add', 'src/a.ts', '.env'], { cwd: root })
-  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'first'], { cwd: root })
-  writeFileSync(join(root, 'src', 'a.ts'), 'changed\n')
+  // A repository is recognised by its .git folder on disk; no git command is run.
+  mkdirSync(join(root, '.git'))
 })
 
 afterAll(() => {
@@ -47,11 +45,30 @@ describe('staying inside the workspace', () => {
     for (const name of ['env.ts', 'keys.md', 'README.md']) expect(looksSecret(name)).toBe(false)
   })
 
-  it('only lets read-only git subcommands and arguments through', () => {
-    expect(checkGitArgs(['log', '--oneline'])).toEqual(['log', '--no-ext-diff', '--no-textconv', '--no-color', '--oneline'])
-    for (const args of [['push'], ['commit', '-m', 'x'], ['config', 'a'], ['diff', '--output=/tmp/x'], ['log', '--ext-diff'], ['show', '--textconv'], []]) {
-      expect(() => checkGitArgs(args)).toThrow(ToolRefusal)
+})
+
+describe('the plugin only reads', () => {
+  it('offers the reviewer read tools only; git, shell and writes are refused', async () => {
+    expect(TOOL_SCHEMAS.map((tool) => tool.name)).toEqual(['read_file', 'list_dir', 'search'])
+    for (const name of ['git', 'bash', 'shell', 'run', 'write_file', 'edit']) {
+      const out = await runTool(root, name, JSON.stringify({ args: ['log'], command: 'ls', path: 'x' }))
+      expect(out.ok).toBe(false)
+      expect(out.text).toContain('不能运行命令')
     }
+  })
+
+  it('no source file can start a process', () => {
+    const src = join(dirname(fileURLToPath(import.meta.url)), '..', 'src')
+    const files: string[] = []
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) walk(join(dir, entry.name))
+        else if (/\.tsx?$/.test(entry.name)) files.push(join(dir, entry.name))
+      }
+    }
+    walk(src)
+    expect(files.length).toBeGreaterThan(10)
+    for (const file of files) expect(readFileSync(file, 'utf8'), file).not.toMatch(/child_process|execFile|spawn\(|\bexecSync\b/)
   })
 })
 
@@ -59,12 +76,10 @@ describe('the reviewer tools', () => {
   it('read_file returns numbered lines and a slice', async () => {
     const out = await runTool(root, 'read_file', JSON.stringify({ path: 'src/a.ts' }))
     expect(out.ok).toBe(true)
-    expect(out.text).toContain('changed')
-    execFileSync('git', ['checkout', '-q', 'src/a.ts'], { cwd: root })
+    expect(out.text).toContain('    1  line 1 needle')
     const slice = await runTool(root, 'read_file', JSON.stringify({ path: 'src/a.ts', start_line: 10, max_lines: 2 }))
     expect(slice.text).toContain('   10  line 10 needle HIT')
     expect(slice.text).toContain('还有')
-    writeFileSync(join(root, 'src', 'a.ts'), 'changed\n')
   })
 
   it('refuses secrets, binaries, folders, escapes and bad JSON — as answers, not crashes', async () => {
@@ -83,35 +98,26 @@ describe('the reviewer tools', () => {
     expect((await runTool(root, 'rm', '{}')).text).toContain('没有这个工具')
   })
 
-  it('list_dir skips heavy folders; search finds lines; git runs read-only commands', async () => {
+  it('list_dir skips heavy folders; search finds lines and skips secrets files', async () => {
     const list = await runTool(root, 'list_dir', '{}')
     expect(list.text).toContain('src/')
     expect(list.text).toContain('node_modules/（已跳过）')
     const found = await runTool(root, 'search', JSON.stringify({ pattern: 'needle HIT' }))
     expect(found.ok).toBe(true)
-    const git = await runTool(root, 'git', JSON.stringify({ args: ['log', '--oneline'] }))
-    expect(git.ok).toBe(true)
-    expect(git.text).toContain('first')
-    const secret = await runTool(root, 'git', JSON.stringify({ args: ['show', 'HEAD:.env'] }))
-    expect(secret.ok).toBe(false)
-    expect(secret.text).toContain('密钥')
-    const push = await runTool(root, 'git', JSON.stringify({ args: ['push'] }))
-    expect(push.ok).toBe(false)
+    expect(found.text).toContain('src/a.ts:10:')
+    const secret = await runTool(root, 'search', JSON.stringify({ pattern: 'API_KEY' }))
+    expect(secret.text).toContain('没有匹配')
+    expect((await runTool(root, 'search', JSON.stringify({ pattern: '(' }))).text).toContain('正则')
   })
 })
 
-describe('workspaceSnapshot', () => {
-  it('gives status and the diff of a repository', async () => {
-    const text = await workspaceSnapshot(root)
-    expect(text).toContain('## git status')
-    expect(text).toContain('src/a.ts')
-    expect(text).toContain('+changed')
-  })
-
-  it('says so for a folder that is not a repository, a missing one, or none', async () => {
-    expect(await workspaceSnapshot(outside)).toContain('不是 git 仓库')
-    expect(await workspaceSnapshot(join(outside, 'nope'))).toContain('不存在')
-    expect(await workspaceSnapshot(undefined)).toContain('没有工作目录')
+describe('workspaceOverview', () => {
+  it('lists the folders and says no command is run', () => {
+    const text = workspaceOverview([root, outside])
+    expect(text).toContain(root)
+    expect(text).toContain(outside)
+    expect(text).toContain('不运行任何命令')
+    expect(workspaceOverview([])).toContain('没有工作目录')
   })
 })
 
@@ -139,7 +145,9 @@ describe('the files a conversation wrote', () => {
   it('opens the repositories of the written files to the tools, never the home folder', async () => {
     const roots = await reviewRoots(outside, [join(root, 'src', 'a.ts'), join(homedir(), '.zshrc')])
     expect(roots).toContain(outside)
-    expect(roots.some((item) => item.endsWith(root.split('/').pop()!))).toBe(true)
+    // src/a.ts lives in the repository whose .git sits at root: the whole repository opens, not just src/.
+    expect(roots).toContain(root)
+    expect(roots).not.toContain(join(root, 'src'))
     expect(roots).not.toContain(homedir())
     const found = await insideRoots([outside, root], join(root, 'src', 'a.ts'))
     expect(found.full).toContain('a.ts')

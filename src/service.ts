@@ -44,7 +44,7 @@ import type {
 } from './shared/protocol'
 import { clampRounds, MAX_PROMPT_CHARS, MAX_PROMPTS, reportMarkdown, type ReviewStore } from './store'
 import { fitTurns, renderBackground, selectTurns, turnsOf, type LogEvent } from './transcript'
-import { workspaceSnapshots } from './workspace'
+import { workspaceOverview } from './workspace'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
@@ -506,8 +506,7 @@ export class ReviewService {
       shown = section.shown
       notes.push(...section.notes)
       roots = await reviewRoots(cwd, files)
-      emit({ type: 'phase', phase: '查看工作区改动' })
-      workspace = await workspaceSnapshots(roots).catch((error) => `（无法读取工作区：${error instanceof Error ? error.message : String(error)}）`)
+      workspace = workspaceOverview(roots)
       if (roots.length > 1) notes.push(`查看了 ${roots.length} 个目录：${roots.join('、')}`)
     }
     const depth = content === 'conversation' ? 'quick' : request.depth

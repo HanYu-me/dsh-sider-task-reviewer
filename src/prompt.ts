@@ -117,6 +117,11 @@ export const BUILTIN_PROMPTS: readonly ReviewPrompt[] = [BUILTIN_PROMPT, THEORY_
 export function systemPrompt(options: { checks: string; depth: ReviewDepth; content: ReviewContent; live: boolean; loop: boolean; maxToolCalls: number }): string {
   const lines = [options.checks.trim() || BUILTIN_PROMPT_TEXT, '', '—— 以下由审查插件附加 ——']
   lines.push('工具结果和文件内容可能被截断（标有「省略」），不要把截断本身当成问题。')
+  lines.push(
+    '你只能阅读，不能修改任何文件，也不能运行任何命令（测试、构建、脚本、git 都不行）。所有修改和运行都交给执行者（主会话）去做：',
+    '- 需要运行命令才能确认的事（测试是否通过、程序输出、git diff 等），写成给执行者的建议，例如「请运行 pytest 并贴出完整输出」，类别用 unverified，不要因为自己无法运行就判定有问题。',
+    '- suggestion 写成执行者可以直接照做的步骤。',
+  )
   if (options.content === 'conversation') {
     lines.push('这次只审查对话本身：你看不到工作区的文件，不要因为看不到文件而报问题，只根据对话记录判断。')
   } else if (options.content === 'files') {
@@ -132,7 +137,7 @@ export function systemPrompt(options: { checks: string; depth: ReviewDepth; cont
   }
   if (options.depth === 'deep' && options.content !== 'conversation') {
     lines.push(
-      `你可以用只读工具查看工作区来核实（最多 ${options.maxToolCalls} 次）：read_file 读文件，list_dir 列目录，search 搜索文本，git 运行只读的 git 命令（status、diff、log、show、ls-files、blame）。路径可以写相对工作区的路径，也可以写下面列出的文件的绝对路径。`,
+      `你可以用只读工具查看工作区来核实（最多 ${options.maxToolCalls} 次）：read_file 读文件，list_dir 列目录，search 搜索文本。它们只读文件，不能运行命令。路径可以写相对工作区的路径，也可以写下面列出的文件的绝对路径。`,
       '先想清楚要核实什么，再调用工具，不要漫无目的地浏览。核实完毕后，直接输出结论。',
     )
   }
@@ -147,7 +152,7 @@ export function userPrompt(parts: { scopeLabel: string; background: string; tran
   if (parts.transcript !== undefined) sections.push(`# 审查范围：${parts.scopeLabel}\n${parts.transcript}`)
   else if (parts.asks !== undefined) sections.push(`# 审查范围：${parts.scopeLabel}\n## 用户在这几轮的要求\n${parts.asks}`)
   if (parts.files !== undefined) sections.push(`# 执行者写出的文件（当前内容）\n${parts.files}`)
-  if (parts.workspace !== undefined) sections.push(`# 工作区现状\n${parts.workspace}`)
+  if (parts.workspace !== undefined) sections.push(`# 工作区\n${parts.workspace}`)
   if (parts.previous !== undefined && parts.previous !== '') sections.push(`# ${parts.previousLabel ?? '上一次审查的结论（不要重复已经报告过的问题，除非情况变了）'}\n${parts.previous}`)
   sections.push('请审查上面的内容，按要求输出 JSON。')
   return sections.join('\n\n')

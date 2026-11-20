@@ -3,11 +3,11 @@
  * patch tools and their path arguments), read from disk as they are now, and
  * the folders a review may look into (the working directory plus the git
  * repositories those files live in — work often happens outside the
- * conversation's working directory).
+ * conversation's working directory). Everything here reads the disk; no
+ * command is run.
  * @module dsh-sider-task-reviewer/files
  */
-import { execFile } from 'node:child_process'
-import { open, stat } from 'node:fs/promises'
+import { lstat, open, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import type { TurnRecord } from './transcript'
@@ -110,12 +110,15 @@ export async function filesSection(paths: readonly string[], budget = 60_000, pe
   return { text: parts.join('\n\n'), shown, notes }
 }
 
-function gitTop(dir: string): Promise<string | undefined> {
-  return new Promise((done) => {
-    execFile('git', ['-C', dir, 'rev-parse', '--show-toplevel'], { timeout: 5000, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } }, (error, stdout) => {
-      done(error === null ? String(stdout).trim() || undefined : undefined)
-    })
-  })
+/** The repository a folder belongs to: the nearest folder upward holding `.git` (read from disk, no git command). */
+async function gitTop(dir: string): Promise<string | undefined> {
+  let current = resolve(dir)
+  for (;;) {
+    if (await lstat(resolve(current, '.git')).then(() => true, () => false)) return current
+    const parent = dirname(current)
+    if (parent === current) return undefined
+    current = parent
+  }
 }
 
 /**
@@ -125,21 +128,26 @@ function gitTop(dir: string): Promise<string | undefined> {
 export async function reviewRoots(cwd: string | undefined, files: readonly string[]): Promise<string[]> {
   const roots: string[] = []
   const home = homedir()
+  // Never open up the home folder or anything above it because one file there was written.
+  const allowed = (dir: string): boolean => !(dir === '/' || dir === home || home.startsWith(dir + '/') || dir.split('/').length < 4)
   const add = (dir: string | undefined): void => {
-    if (dir === undefined) return
-    // Never open up the home folder or anything above it because one file there was written.
-    if (dir === '/' || dir === home || home.startsWith(dir + '/') || dir.split('/').length < 4) return
+    if (dir === undefined || !allowed(dir)) return
     if (roots.some((root) => dir === root || dir.startsWith(root + '/'))) return
     // A new root that contains earlier ones replaces them.
     for (let i = roots.length - 1; i >= 0; i--) if (roots[i]!.startsWith(dir + '/')) roots.splice(i, 1)
     roots.push(dir)
   }
-  if (cwd !== undefined) add((await gitTop(cwd)) ?? cwd)
+  // A repository at or above the home folder (dotfiles) does not open it up: the folder itself is used instead.
+  const top = async (dir: string): Promise<string> => {
+    const repo = await gitTop(dir)
+    return repo !== undefined && allowed(repo) ? repo : dir
+  }
+  if (cwd !== undefined) add(await top(cwd))
   const dirs = [...new Set(files.map((file) => dirname(file)))]
   for (const dir of dirs) {
     const exists = await stat(dir).then((info) => info.isDirectory()).catch(() => false)
     if (!exists) continue
-    add((await gitTop(dir)) ?? dir)
+    add(await top(dir))
   }
   return roots.slice(0, 8)
 }

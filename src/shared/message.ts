@@ -34,7 +34,7 @@ export function messageFor(report: Report, findings: readonly Finding[], loop?: 
   const body = findings.map((finding, i) => findingText(finding, i + 1)).join('\n\n')
   const tail =
     loop !== undefined
-      ? '请逐条核实：确实存在的请直接修正；你认为不成立的，说明理由。改完后简要说明改了什么，审查会自动再看一遍。'
-      : '请逐条核实：确实存在的请修正；你认为不成立的，说明理由。'
+      ? '请逐条核实：确实存在的请直接修正；你认为不成立的，说明理由。需要运行命令核实的（测试、构建、git diff 等）请你来运行并贴出结果，审查只读、不运行命令。改完后简要说明改了什么，审查会自动再看一遍。'
+      : '请逐条核实：确实存在的请修正；你认为不成立的，说明理由。需要运行命令核实的（测试、构建、git diff 等）请你来运行并贴出结果，审查只读、不运行命令。'
   return `${head}\n\n${body}\n\n${tail}`
 }

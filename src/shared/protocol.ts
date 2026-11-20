@@ -12,8 +12,9 @@ export type ReviewScope = { kind: 'last' } | { kind: 'all' } | { kind: 'range'; 
 
 /**
  * How far the reviewer may look.
- * - quick: the conversation (with tool calls and results) plus the workspace `git diff`.
- * - deep: the same, and the reviewer may read files, list folders, search and run read-only git commands in the workspace.
+ * - quick: the conversation (with tool calls and results) plus the files it wrote, as they are now.
+ * - deep: the same, and the reviewer may read files, list folders and search in the workspace.
+ * The plugin never writes a file or runs a command; whatever needs that is asked of the working conversation.
  */
 export type ReviewDepth = 'quick' | 'deep'
 
@@ -92,7 +93,7 @@ export interface Finding {
 /** A tool the deep reviewer used, for the report's trail. */
 export interface ReviewToolUse {
   name: string
-  /** Short form of the arguments: the path, the pattern, the git command. */
+  /** Short form of the arguments: the path or the pattern. */
   target: string
   ok: boolean
 }

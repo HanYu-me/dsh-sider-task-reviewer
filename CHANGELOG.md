@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 — 2026-11-20
+
+- **Read-only, everything goes through the main conversation.** The plugin and the reviewer never write a file and never run a command: the deep-review `git` tool is gone (deep review keeps `read_file`, `list_dir` and `search`, all plain file reads), search no longer calls `git grep`, the workspace `git status` / `git diff` snapshot is no longer taken, and a file's repository is found by its `.git` folder on disk. The reviewer is told so: whatever needs a change or a command (tests, builds, `git diff`) becomes a suggestion for the main conversation, e.g. "run pytest and paste the output". The message sent to the main conversation says the same. A test fails if any source file can start a process.
+
 ## 0.1.0 — 2026-11-20
 
 First release.

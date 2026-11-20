@@ -422,7 +422,7 @@ function SettingsSection({ state }: { state: SessionState }) {
         />
       </div>
       <p className="rv-hint" style={{ margin: '8px 0 0' }}>
-        审查时，对话记录、工具输出、生成的文件和工作区改动会发给你选的审查模型（可能是另一家服务商）。常见的密钥和 token 会先隐藏；.env、私钥等文件不会被读取。
+        审查时，对话记录、工具输出和生成的文件会发给你选的审查模型（可能是另一家服务商）。常见的密钥和 token 会先隐藏；.env、私钥等文件不会被读取。审查插件只读：不改文件、不运行命令，修改和运行都交给主会话。
       </p>
     </div>
   )
@@ -632,7 +632,7 @@ export function ReviewPane({ sessionId }: { sessionId: string | undefined }) {
                   value={settings.depth}
                   options={[
                     { value: 'quick', label: '快速', title: '只看发过去的内容，不自己查看文件' },
-                    { value: 'deep', label: '深入', title: '审查模型还可以用只读工具查看工作区来核实（更准，更慢）' },
+                    { value: 'deep', label: '深入', title: '审查模型还可以读文件、列目录、搜索来核实（只读，不运行命令；更准，更慢）' },
                   ]}
                   onChange={(depth) => save({ depth })}
                 />

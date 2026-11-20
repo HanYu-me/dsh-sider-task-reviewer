@@ -42,7 +42,7 @@ describe('runReview', () => {
     expect(out.usedDepth).toBe('deep')
     expect(out.text).toBe(GOOD_ANSWER)
     expect(tools).toEqual(['read_file:src/a.ts:true', 'read_file:../../etc/passwd:false'])
-    expect(llm.calls[0]!.tools).toHaveLength(4)
+    expect(llm.calls[0]!.tools).toHaveLength(3)
     const second = llm.calls[1]!.messages as Array<{ role: string; content: Array<{ text?: string }>; isError?: boolean }>
     expect(second.map((message) => message.role)).toEqual(['user', 'assistant', 'tool', 'tool'])
     expect(second[2]!.content[0]!.text).toContain('export const a = 1')
@@ -120,7 +120,10 @@ describe('ReviewService', () => {
     const prompt = JSON.stringify(llm.calls[0]!.messages)
     expect(prompt).toContain('把测试修好')
     expect(prompt).toContain('2 failed')
-    expect(prompt).toContain('工作区现状')
+    expect(prompt).toContain('# 工作区')
+    // The reviewer is told it can only read; anything to change or run goes to the working conversation.
+    expect(String(llm.calls[0]!.system)).toContain('不能运行任何命令')
+    expect(String(llm.calls[0]!.system)).toContain('交给执行者（主会话）')
   })
 
   it('picks the reviewer: the panel choice, DSH default, then the working model', async () => {
@@ -271,7 +274,7 @@ describe('what a review looks at', () => {
     const prompt = JSON.stringify(llm.calls[0]!.messages)
     expect(prompt).toContain('改好了，测试通过')
     expect(prompt).not.toContain('执行者写出的文件')
-    expect(prompt).not.toContain('工作区现状')
+    expect(prompt).not.toContain('# 工作区')
     expect(llm.calls[0]!.tools).toBeUndefined()
     expect(report.usedDepth).toBe('quick')
     expect(report.notes.join()).toContain('只看对话')
