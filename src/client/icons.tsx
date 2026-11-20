@@ -33,3 +33,5 @@ export const TrashIcon = ({ size = 13 }: { size?: number }) => svg(size, [<path 
 export const PanelIcon = ({ size = 14 }: { size?: number }) => svg(size, [<path key="a" d="M4 5h16v14H4z" />, <path key="b" d="M14 5v14" />])
 /** Two arrows in a circle: a continuous review. */
 export const LoopIcon = ({ size = 14 }: { size?: number }) => svg(size, [<path key="a" d="M20 11a8 8 0 0 0-14.3-4.9L4 8" />, <path key="b" d="M4 4v4h4" />, <path key="c" d="M4 13a8 8 0 0 0 14.3 4.9L20 16" />, <path key="d" d="M20 20v-4h-4" />])
+export const ChatIcon = ({ size = 14 }: { size?: number }) => svg(size, <path d="M5 5h14v10H10l-4 4v-4H5z" />)
+export const ResetIcon = ({ size = 13 }: { size?: number }) => svg(size, [<path key="a" d="M4 12a8 8 0 1 0 2.3-5.6L4 8.7" />, <path key="b" d="M4 4v4.7h4.7" />])

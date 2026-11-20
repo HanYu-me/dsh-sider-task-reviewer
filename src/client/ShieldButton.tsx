@@ -5,7 +5,8 @@
  *   suggestions into the input box (below anything already typed there) for
  *   the user to edit and send. A passing review puts nothing.
  * - Right click (or the context-menu key): a menu to start or stop a
- *   continuous review, switch live review, or open the 「任务审查」 tab.
+ *   continuous review, switch live review, open the 「任务审查」 tab, or
+ *   discuss the reviews with the reviewer.
  * The dot shows the review of the conversation's latest turn (green pass,
  * amber doubt, red problems, pulsing blue while reviewing); once the
  * conversation moves on past the reviewed turns, it goes away. The button also registers this
@@ -17,7 +18,8 @@ import { messageFor, openFindings } from '../shared/message'
 import { CONTENT_LABELS, scopeLabel, VERDICT_LABELS, type Report, type Verdict } from '../shared/protocol'
 import { api, refreshSoon, useReviewState } from './api'
 import { putIntoComposer, registerComposer, type ComposerActions } from './compose'
-import { LoopIcon, PanelIcon, PlayIcon, ShieldIcon, StopIcon } from './icons'
+import { ChatIcon, LoopIcon, PanelIcon, PlayIcon, ShieldIcon, StopIcon } from './icons'
+import { showView } from './views'
 
 /** Open the 「任务审查」 tab of the on-screen conversation (set by the plugin entry). */
 export const pane = { open: (): void => {} }
@@ -191,6 +193,18 @@ export function ShieldButton({ sessionId, inputActions, useInput }: { sessionId:
             }}
           >
             <PanelIcon size={13} /> 打开审查面板
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="rv-menu-item"
+            onClick={() => {
+              setOpen(false)
+              showView('chat')
+              pane.open()
+            }}
+          >
+            <ChatIcon size={13} /> 和审查 AI 讨论
           </button>
           <div className="rv-menu-sep" />
           <button

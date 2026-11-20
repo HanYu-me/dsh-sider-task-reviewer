@@ -20,9 +20,9 @@ DeepSeek Harness (DSH) 插件：用**另一个模型**审查当前对话正在�
 |---|---|
 | ![左键盾牌](docs/images/shield-light.png) | ![右键菜单](docs/images/menu-light.png) |
 
-| 连续审查：第 2/5 轮 | 提示词：内置四个，可改、可新建 | 深色主题 |
-|---|---|---|
-| ![连续审查](docs/images/loop-light.png) | ![提示词](docs/images/prompts-light.png) | ![深色主题](docs/images/review-dark.png) |
+| 连续审查：第 2/5 轮 | 和审查 AI 讨论 | 提示词：内置四个，可改、可新建 | 深色主题 |
+|---|---|---|---|
+| ![连续审查](docs/images/loop-light.png) | ![和审查 AI 讨论](docs/images/chat-light.png) | ![提示词](docs/images/prompts-light.png) | ![深色主题](docs/images/review-dark.png) |
 
 ## 在哪里
 
@@ -77,9 +77,19 @@ DeepSeek Harness (DSH) 插件：用**另一个模型**审查当前对话正在�
    - 在 ⚙ 里可以改成「轮中也审」：每步之后停顿几秒就审一次，同一对话两次之间至少间隔 45 秒。
    - **只提示，不会自动打断主模型。**
 
+10. **连贯审查**：同一个对话的所有审查（手动、盾牌、实时、连续）共用一份「审查记录」。每次审查都带上这份记录：之前的审查结论，以及你和审查模型的讨论。审查模型因此能前后一致：已经改好的不再报，之前判断错了会更正，你在讨论里补充的情况也会考虑进去。
+    - 较早的审查只保留结论，最近一次保留当时发给它的完整材料；记录太长时，从最早的开始省略（约 4 万字以内），长度不会无限增长。
+    - 记录放在请求里，作为一段文字发出，不另开 DSH 会话。所以照样只读，任何模型都能用，包括 Antigravity 这类代理型模型。
+    - 每个对话的记录存在 `~/.dsh/sider-task-reviewer/sessions/<会话 id>.json` 里。
+11. **和审查 AI 讨论**：最近一次报告下面有「和审查 AI 讨论」按钮，面板顶部的「讨论」也能进入；盾牌右键菜单里也有。
+    - 审查模型记得最近一次审查的完整材料、之前的审查结论和你们的讨论，可以追问「第 2 条为什么算问题」「这条是不是误报」。
+    - 需要时它可以用只读工具再看文件（最多 8 次），不会修改文件或运行命令。
+    - 它的回答可以「放进输入框」或「直接发送」给主会话，和审查问题一样。
+    - 「重新开始」清空这个对话的审查记录（报告保留），以后的审查从头开始。
+
 **输入框旁的盾牌**：
 - 左键：审查最后一轮（模型、内容、深度、提示词用面板里的设置），结束后把建议放进输入框，接在已有内容下面。审查通过就什么都不放，只在气泡里说一声。
-- 右键（或键盘的菜单键 / Shift+F10）：打开菜单，可以开始或停止连续审查、开关实时审查、打开面板。
+- 右键（或键盘的菜单键 / Shift+F10）：打开菜单，可以开始或停止连续审查、开关实时审查、打开面板、和审查 AI 讨论。
 
 报告按对话保存在 `~/.dsh/sider-task-reviewer/sessions/<会话 id>.json`，每个对话最多 100 份，可以导出 Markdown。
 
@@ -125,6 +135,8 @@ Antigravity 对这类审查调用固定用 low 思考强度，面板里选的思
 | `GET /prompts` · `POST /prompt {id?, name, text}` · `POST /prompt/delete {id}` | 审查提示词 |
 | `POST /loop/start {session, scope, content, depth, route?, maxRounds}` · `POST /loop/stop` | 连续审查 |
 | `POST /dismiss` · `POST /remove` · `GET /export` | 忽略问题 · 删除报告 · 导出 Markdown |
+| `POST /chat {session, text, route?}` · `POST /chat/cancel {session}` | 和审查 AI 讨论（回答用 server-sent events 推送） · 停止回答 |
+| `POST /thread/reset {session}` | 清空这个对话的审查记录（报告保留） |
 | `GET /live` | 已加载的对话（诊断用） |
 
 ## 开发

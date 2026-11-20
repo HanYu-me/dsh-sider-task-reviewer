@@ -5,7 +5,7 @@
  */
 import { useEffect, useSyncExternalStore } from 'react'
 import { REVIEW_PREFIX } from '../shared/protocol'
-import type { ApiResult, GlobalSettings, LoopState, ModelCatalog, ModelEfforts, ModelRoute, Report, ReviewContent, ReviewDepth, ReviewPrompt, ReviewScope, SendResult, SessionSettings, SessionState } from '../shared/protocol'
+import type { ApiResult, ChatStreamEvent, GlobalSettings, LoopState, ModelCatalog, ModelEfforts, ModelRoute, Report, ReviewContent, ReviewDepth, ReviewPrompt, ReviewScope, SendResult, SessionSettings, SessionState, ThreadEntry } from '../shared/protocol'
 
 /** What a review covers and how; every field optional (the conversation's settings fill the rest on the host). */
 export interface ReviewOptions {
@@ -14,6 +14,44 @@ export interface ReviewOptions {
   content: ReviewContent
   route?: ModelRoute
   promptId?: string
+}
+
+/** Read a server-sent event stream to its end, handing each event over. */
+async function readEvents<E>(response: Response, onEvent: (event: E) => void): Promise<void> {
+  if (!response.ok || response.body === null) {
+    let message = `请求没有成功（HTTP ${response.status}）`
+    try {
+      const parsed = (await response.json()) as ApiResult<unknown>
+      if (!parsed.ok) message = parsed.error
+    } catch {
+      // keep the generic message
+    }
+    throw new Error(message)
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let cut = buffer.indexOf('\n\n')
+    while (cut >= 0) {
+      const frame = buffer.slice(0, cut)
+      buffer = buffer.slice(cut + 2)
+      for (const line of frame.split('\n')) {
+        if (!line.startsWith('data: ')) continue
+        let event: E
+        try {
+          event = JSON.parse(line.slice(6)) as E
+        } catch {
+          continue
+        }
+        onEvent(event)
+      }
+      cut = buffer.indexOf('\n\n')
+    }
+  }
 }
 
 async function call<T>(path: string, body?: unknown): Promise<T> {
@@ -48,6 +86,30 @@ export const api = {
     if (!response.ok) throw new Error(`导出失败（HTTP ${response.status}）`)
     return response.text()
   },
+  cancelChat: (session: string) => call<boolean>('/chat/cancel', { session }),
+  resetThread: (session: string) => call<boolean>('/thread/reset', { session }),
+  /**
+   * Say something to the reviewer about its reviews of a conversation.
+   * Resolves with its reply; the reply streams in through `onEvent`.
+   */
+  async chat(session: string, text: string, onEvent: (event: ChatStreamEvent) => void, route?: ModelRoute): Promise<ThreadEntry> {
+    const response = await fetch(`${REVIEW_PREFIX}/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session, text, ...(route !== undefined ? { route } : {}) }),
+    })
+    let failure: string | undefined
+    let reply: ThreadEntry | undefined
+    await readEvents<ChatStreamEvent>(response, (event) => {
+      if (event.type === 'error') failure = event.message
+      if (event.type === 'done') reply = event.entry
+      onEvent(event)
+    })
+    refreshSoon(session)
+    if (failure !== undefined) throw new Error(failure)
+    if (reply === undefined) throw new Error('审查模型没有回答')
+    return reply
+  },
   /**
    * Start a review. Resolves when it is over (the progress itself is read
    * from the polled state); rejects with the reason when it fails.
@@ -58,42 +120,16 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ session, ...options }),
     })
-    if (!response.ok || response.body === null) {
-      let message = `审查没有开始（HTTP ${response.status}）`
-      try {
-        const parsed = (await response.json()) as ApiResult<unknown>
-        if (!parsed.ok) message = parsed.error
-      } catch {
-        // keep the generic message
-      }
-      throw new Error(message)
-    }
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
     let failure: string | undefined
     let report: Report | undefined
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      let cut = buffer.indexOf('\n\n')
-      while (cut >= 0) {
-        const frame = buffer.slice(0, cut)
-        buffer = buffer.slice(cut + 2)
-        for (const line of frame.split('\n')) {
-          if (!line.startsWith('data: ')) continue
-          try {
-            const event = JSON.parse(line.slice(6)) as { type: string; message?: string; report?: Report }
-            if (event.type === 'error') failure = event.message
-            if (event.type === 'done') report = event.report
-            if (event.type === 'phase' || event.type === 'tool' || event.type === 'done' || event.type === 'error') refreshSoon(session)
-          } catch {
-            // ignore a broken frame
-          }
-        }
-        cut = buffer.indexOf('\n\n')
-      }
+    try {
+      await readEvents<{ type: string; message?: string; report?: Report }>(response, (event) => {
+        if (event.type === 'error') failure = event.message
+        if (event.type === 'done') report = event.report
+        if (event.type === 'phase' || event.type === 'tool' || event.type === 'done' || event.type === 'error') refreshSoon(session)
+      })
+    } catch (error) {
+      throw new Error((error instanceof Error ? error.message : String(error)).replace('请求没有成功', '审查没有开始'))
     }
     refreshSoon(session)
     if (failure !== undefined) throw new Error(failure)
@@ -147,7 +183,7 @@ async function poll(session: string): Promise<void> {
     }
     notify(entry)
   }
-  if (entry.users > 0) entry.timer = setTimeout(() => void poll(session), entry.state?.running !== undefined ? 1000 : 5000)
+  if (entry.users > 0) entry.timer = setTimeout(() => void poll(session), entry.state?.running !== undefined || entry.state?.chatting !== undefined ? 1000 : 5000)
 }
 
 /** Read the state again now (after an action), not at the next tick. */

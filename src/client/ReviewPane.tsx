@@ -7,7 +7,8 @@
  *   limit is reached;
  * - read the findings with their evidence, hand them back (only on a press),
  *   look through the saved reviews;
- * - a second view edits the review prompts.
+ * - a second view is the discussion with the reviewer about its reviews of
+ *   this conversation; a third edits the review prompts.
  * @module dsh-sider-task-reviewer/client/ReviewPane
  */
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
@@ -15,8 +16,10 @@ import { CATEGORY_LABELS, CONTENT_LABELS, scopeLabel, SEVERITY_LABELS, VERDICT_L
 import type { Finding, LoopState, ModelCatalog, ModelEfforts, ModelRoute, Report, ReviewContent, ReviewDepth, ReviewPrompt, ReviewScope, SessionState } from '../shared/protocol'
 import { api, loadCatalog, loadEfforts, refreshSoon, useReviewState } from './api'
 import { composerOf, messageFor, onComposers, openFindings, putIntoComposer } from './compose'
-import { CopyIcon, DownloadIcon, EyeOffIcon, GearIcon, InsertIcon, LoopIcon, PlayIcon, SendIcon, ShieldIcon, StopIcon, TrashIcon } from './icons'
+import { ChatIcon, CopyIcon, DownloadIcon, EyeOffIcon, GearIcon, InsertIcon, LoopIcon, PlayIcon, SendIcon, ShieldIcon, StopIcon, TrashIcon } from './icons'
+import { ChatView } from './ChatView'
 import { PromptsView } from './PromptsView'
+import { onShowView, takeRequestedView, type PaneView } from './views'
 
 const SEP = '\u0000'
 
@@ -191,7 +194,7 @@ function FindingCard({ finding, index, report, sessionId, onNote }: { finding: F
   )
 }
 
-function ReportView({ report, sessionId, catalog, onNote }: { report: Report; sessionId: string; catalog: ModelCatalog | undefined; onNote(text: string): void }) {
+function ReportView({ report, sessionId, catalog, onNote, onDiscuss }: { report: Report; sessionId: string; catalog: ModelCatalog | undefined; onNote(text: string): void; onDiscuss?: () => void }) {
   const composerReady = useComposerReady(sessionId)
   const open = openFindings(report)
   const unreadable = report.raw !== undefined && report.findings.length === 0 && report.summary.startsWith('审查模型的回答不是约定的格式')
@@ -280,6 +283,13 @@ function ReportView({ report, sessionId, catalog, onNote }: { report: Report; se
           <summary>审查模型原文</summary>
           <pre className="rv-raw rv-mono">{report.raw}</pre>
         </details>
+      ) : null}
+      {onDiscuss !== undefined ? (
+        <div className="rv-actions" style={{ marginTop: 10 }}>
+          <button type="button" className="rv-btn rv-btn-sm rv-grow" title="和审查模型讨论这次审查：它记得这次和之前的审查" onClick={onDiscuss}>
+            <ChatIcon size={13} /> 和审查 AI 讨论
+          </button>
+        </div>
       ) : null}
       <div className="rv-actions" style={{ marginTop: 10 }}>
         <button
@@ -434,7 +444,7 @@ export function ReviewPane({ sessionId }: { sessionId: string | undefined }) {
   const [catalog, setCatalog] = useState<ModelCatalog | undefined>(undefined)
   const [catalogError, setCatalogError] = useState<string | undefined>(undefined)
   const [prompts, setPrompts] = useState<ReviewPrompt[]>([])
-  const [view, setView] = useState<'review' | 'prompts'>('review')
+  const [view, setView] = useState<PaneView>(() => takeRequestedView() ?? 'review')
   const [showSettings, setShowSettings] = useState(false)
   const [picked, setPicked] = useState<string | undefined>(undefined)
   const [note, setNote] = useState<string | undefined>(undefined)
@@ -455,6 +465,8 @@ export function ReviewPane({ sessionId }: { sessionId: string | undefined }) {
       alive = false
     }
   }, [])
+  // The shield's menu can ask for the discussion.
+  useEffect(() => onShowView(setView), [])
   useEffect(() => {
     if (note === undefined) return undefined
     const timer = setTimeout(() => setNote(undefined), 6000)
@@ -539,6 +551,9 @@ export function ReviewPane({ sessionId }: { sessionId: string | undefined }) {
             <button type="button" aria-pressed={view === 'review'} className={view === 'review' ? 'is-on' : ''} onClick={() => setView('review')}>
               审查
             </button>
+            <button type="button" aria-pressed={view === 'chat'} className={view === 'chat' ? 'is-on' : ''} onClick={() => setView('chat')}>
+              讨论
+            </button>
             <button type="button" aria-pressed={view === 'prompts'} className={view === 'prompts' ? 'is-on' : ''} onClick={() => setView('prompts')}>
               提示词
             </button>
@@ -550,7 +565,22 @@ export function ReviewPane({ sessionId }: { sessionId: string | undefined }) {
 
         {showSettings ? <SettingsSection state={state} /> : null}
 
-        {view === 'prompts' ? (
+        {view === 'chat' ? (
+          <>
+            {note !== undefined ? <div className="rv-banner is-info">{note}</div> : null}
+            <ChatView
+              state={state}
+              sessionId={sessionId}
+              catalog={catalog}
+              modelName={route !== undefined ? `${modelName(catalog, route)}${route.effort !== undefined ? ` · 思考 ${route.effort}` : ''}` : '跟随 DSH 默认'}
+              onNote={setNote}
+              onOpenReport={(reportId) => {
+                setPicked(reportId)
+                setView('review')
+              }}
+            />
+          </>
+        ) : view === 'prompts' ? (
           <PromptsView
             global={state.global}
             onChanged={() => {
@@ -705,7 +735,7 @@ export function ReviewPane({ sessionId }: { sessionId: string | undefined }) {
             <Running state={state} />
 
             {shown !== undefined ? (
-              <ReportView report={shown} sessionId={sessionId} catalog={catalog} onNote={setNote} />
+              <ReportView report={shown} sessionId={sessionId} catalog={catalog} onNote={setNote} {...(shown.id === latest?.id ? { onDiscuss: () => setView('chat') } : {})} />
             ) : !running ? (
               <div className="rv-empty">
                 <ShieldIcon size={30} />

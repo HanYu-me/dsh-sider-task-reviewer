@@ -1,7 +1,7 @@
 {
   "name": "dsh-sider-task-reviewer",
-  "description": "Sider Task Reviewer for the DeepSeek Harness (dsh): another model of your choice reviews the task the current conversation is doing or has done — the conversation, the files it wrote, or both; quick or deep (read-only file tools). It never edits a file or runs a command: anything to change or run is handed to the main conversation. Findings come with evidence and are saved per conversation. A shield beside the input box puts the suggestions into the composer; continuous review sends them to the working model and re-reviews its fix until it passes; built-in prompts for work, derivations, literature surveys and plans.",
-  "version": "0.1.2",
+  "description": "Sider Task Reviewer for the DeepSeek Harness (dsh): another model of your choice reviews the task the current conversation is doing or has done — the conversation, the files it wrote, or both; quick or deep (read-only file tools). It never edits a file or runs a command: anything to change or run is handed to the main conversation. Findings come with evidence and are saved per conversation; the reviews of one conversation remember each other, and you can discuss a review with the reviewer. A shield beside the input box puts the suggestions into the composer; continuous review sends them to the working model and re-reviews its fix until it passes; built-in prompts for work, derivations, literature surveys and plans.",
+  "version": "0.1.3",
   "type": "module",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

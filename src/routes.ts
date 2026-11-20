@@ -15,12 +15,14 @@
  *   POST /dismiss  {session, reportId, index, dismissed}
  *   POST /remove   {session, reportId}
  *   GET  /export?session=ID&report=ID                Markdown
+ *   POST /chat     {session, text, route?}           discuss the reviews with the reviewer (SSE)
+ *   POST /chat/cancel {session} · POST /thread/reset {session}   stop a reply · start the reviewer's conversation afresh
  * @module dsh-sider-task-reviewer/routes
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { ReviewError } from './runner'
 import type { ReviewService } from './service'
-import { REVIEW_PREFIX, type ModelRoute, type ReviewContent, type ReviewDepth, type ReviewScope, type ReviewStreamEvent } from './shared/protocol'
+import { REVIEW_PREFIX, type ChatStreamEvent, type ModelRoute, type ReviewContent, type ReviewDepth, type ReviewScope, type ReviewStreamEvent } from './shared/protocol'
 
 const MAX_BODY = 256 * 1024
 
@@ -88,7 +90,7 @@ function contentOf(value: unknown): ReviewContent {
 }
 
 /** Open a server-sent event stream; returns the writer and a closed flag. */
-function openStream(req: IncomingMessage, res: ServerResponse): { write(event: ReviewStreamEvent): void; end(): void; closed(): boolean } {
+function openStream(req: IncomingMessage, res: ServerResponse): { write(event: ReviewStreamEvent | ChatStreamEvent): void; end(): void; closed(): boolean } {
   res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' })
   res.write(': open\n\n')
   let closed = false
@@ -183,6 +185,29 @@ export async function serveReviewer(service: ReviewService, req: IncomingMessage
       }
       case '/cancel':
         return ok(res, service.cancel(sessionOf(body.session)))
+      case '/chat': {
+        const session = sessionOf(body.session)
+        const text = typeof body.text === 'string' ? body.text : ''
+        const route = routeOf(body.route)
+        const stream = openStream(req, res)
+        let settled = false
+        // Closing the page does not stop the reply: it finishes and is kept.
+        await service
+          .chat(session, text, route, (event) => {
+            if (event.type === 'done' || event.type === 'error') settled = true
+            stream.write(event)
+          })
+          .catch((error: unknown) => {
+            if (!settled) stream.write({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+          })
+        stream.end()
+        return
+      }
+      case '/chat/cancel':
+        return ok(res, service.cancelChat(sessionOf(body.session)))
+      case '/thread/reset':
+        await service.resetThread(sessionOf(body.session))
+        return ok(res, true)
       case '/settings': {
         const patch: Parameters<ReviewService['setSettings']>[1] = {}
         if (typeof body.live === 'boolean') patch.live = body.live

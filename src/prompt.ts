@@ -125,7 +125,7 @@ export const BUILTIN_PROMPTS: readonly ReviewPrompt[] = [BUILTIN_PROMPT, THEORY_
 export const REVIEW_MARKER = 'REVIEW_POLICY'
 
 /** The system prompt for one review. */
-export function systemPrompt(options: { checks: string; depth: ReviewDepth; content: ReviewContent; live: boolean; loop: boolean; maxToolCalls: number }): string {
+export function systemPrompt(options: { checks: string; depth: ReviewDepth; content: ReviewContent; live: boolean; loop: boolean; maxToolCalls: number; thread?: boolean }): string {
   const lines = [options.checks.trim() || BUILTIN_PROMPT_TEXT, '', `—— 以下由审查插件附加（${REVIEW_MARKER}：只读审查）——`]
   lines.push('工具结果和文件内容可能被截断（标有「省略」），不要把截断本身当成问题。')
   lines.push(
@@ -139,6 +139,12 @@ export function systemPrompt(options: { checks: string; depth: ReviewDepth; cont
     lines.push('这次只审查执行者写出的文件：根据用户的要求，判断这些文件的内容是否正确、完整、安全。对话里执行者说了什么不是重点，以文件实际内容为准。')
   } else {
     lines.push('对话记录和执行者写出的文件都要看：既核对执行者的说法，也检查文件实际内容。')
+  }
+  if (options.thread === true) {
+    lines.push(
+      '你在持续审查这个对话：请求开头「你之前对这个对话的审查和讨论」一节，是你之前对它的审查结论，以及你和用户对审查的讨论（只保留了结论，当时的对话和文件已省略）。',
+      '保持前后一致：已经改好的不要再报；之前判断错了就直接更正；用户在讨论里补充的情况要考虑进去。这次只审查最新发来的内容。',
+    )
   }
   if (options.live) {
     lines.push('这是在任务过程中的审查，任务可能还在进行中：只看已经发生的事。不要因为还没轮到的步骤报 missing，除非执行者已经声称完成。')
@@ -155,6 +161,27 @@ export function systemPrompt(options: { checks: string; depth: ReviewDepth; cont
   lines.push('', '最后只输出一个 JSON 对象，不要输出任何其他文字，不要用代码块包裹。格式：', RESULT_SHAPE)
   return lines.join('\n')
 }
+
+/** The system prompt of the discussion about the reviews. */
+export function chatSystemPrompt(options: { checks: string; tools: boolean; maxToolCalls: number }): string {
+  const lines = [options.checks.trim() || BUILTIN_PROMPT_TEXT, '', `—— 以下由审查插件附加（${REVIEW_MARKER}：只读审查 · 讨论）——`]
+  lines.push(
+    '现在用户想和你讨论你的审查。请求里「你之前对这个对话的审查和讨论」一节是记录：最近一次审查附有当时发给你的对话和文件，较早的只保留了你的结论；还有你们之前的讨论。最后是用户现在对你说的话，回答它。',
+    '- 用中文直接回答，不要输出 JSON；需要时可以用简短的列表。',
+    '- 坚持有证据的判断。用户指出你错了而且有道理，就明确更正；拿不准的，说明需要核实什么、怎么核实。',
+    '- 你只能阅读，不能修改任何文件，也不能运行任何命令（测试、构建、脚本、git 都不行）。需要主会话去做的事（修改、运行测试等），写成一段可以直接发给主会话的话。',
+  )
+  if (options.tools) {
+    lines.push(`- 需要时可以用只读工具查看工作区（最多 ${options.maxToolCalls} 次）：read_file 读文件，list_dir 列目录，search 搜索文本。它们只读文件，不能运行命令。`)
+  }
+  return lines.join('\n')
+}
+
+/** Said in the discussion when the model thought until its output budget ran out and wrote nothing. */
+export const CHAT_ANSWER_NOW = '你上一次的回答在思考阶段就用完了输出长度，没有写出回答。请少思考，直接简短地回答。'
+
+/** Said in the discussion when the tool budget is spent. */
+export const CHAT_FINISH_NOW = '工具调用次数已用完。请根据已经查看的内容直接回答。'
 
 /** The request the reviewer reads. */
 export function userPrompt(parts: { scopeLabel: string; background: string; transcript?: string; asks?: string; files?: string; workspace?: string; previous?: string; previousLabel?: string }): string {

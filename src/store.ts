@@ -1,7 +1,8 @@
 /**
  * Saved reviews and settings, on disk under `~/.dsh/sider-task-reviewer/`
  * (moves with `DSH_SIDER_TASK_REVIEWER_DIR`):
- * - `sessions/<id>.json`: one conversation's settings and reports;
+ * - `sessions/<id>.json`: one conversation's reports and the reviewer's own
+ *   conversation about it (its reviews and the discussion of them);
  * - `settings.json`: the defaults for every conversation and the review prompts.
  * Writes go to a temporary file renamed into place, so a crash never leaves
  * half a file. Calls for one file are serialized.
@@ -11,6 +12,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { BUILTIN_PROMPT_ID, type GlobalSettings, type ModelRoute, type Report, type ReviewPrompt, type ReviewScope, type SessionSettings } from './shared/protocol'
+import { sanitizeThread, type StoredThread } from './thread'
 
 /** Most reports kept per conversation (oldest go first). */
 export const MAX_REPORTS = 100
@@ -22,6 +24,8 @@ export interface SessionFile {
   settings: SessionSettings
   /** Newest first. */
   reports: Report[]
+  /** The reviewer's own conversation about this one. */
+  thread?: StoredThread
 }
 
 export function defaultStoreDir(): string {
@@ -95,10 +99,12 @@ export function sanitizePrompts(value: unknown): ReviewPrompt[] {
 
 function sanitize(value: unknown): SessionFile {
   const record = typeof value === 'object' && value !== null ? (value as Partial<SessionFile>) : {}
+  const thread = sanitizeThread(record.thread)
   return {
     version: 1,
     settings: sanitizeSettings(record.settings),
     reports: Array.isArray(record.reports) ? record.reports.filter((item) => typeof item === 'object' && item !== null && typeof item.id === 'string').slice(0, MAX_REPORTS) : [],
+    ...(thread !== undefined ? { thread } : {}),
   }
 }
 
@@ -126,6 +132,8 @@ export interface ReviewStore {
   addReport(report: Report): Promise<SessionFile>
   updateReport(sessionId: string, id: string, change: (report: Report) => Report): Promise<Report | undefined>
   removeReport(sessionId: string, id: string): Promise<boolean>
+  /** Change the reviewer's conversation (undefined clears it). */
+  updateThread(sessionId: string, change: (thread: StoredThread | undefined) => StoredThread | undefined): Promise<StoredThread | undefined>
 }
 
 /** Shared bookkeeping of both stores: per-conversation files and the global file. */
@@ -211,6 +219,14 @@ function makeStore(io: { read(name: string): Promise<unknown>; write(name: strin
         if (!current.reports.some((item) => item.id === id)) return false
         await write(sessionId, { ...current, reports: current.reports.filter((item) => item.id !== id) })
         return true
+      }),
+    updateThread: (sessionId, change) =>
+      serial(sessionId, async () => {
+        const current = await read(sessionId)
+        const next = change(current.thread)
+        const { thread: _old, ...rest } = current
+        await write(sessionId, next !== undefined ? { ...rest, thread: next } : rest)
+        return next
       }),
   }
 }

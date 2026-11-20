@@ -44,6 +44,7 @@ function state(over: Partial<SessionState> = {}): SessionState {
     global: { liveTrigger: 'turn', activePromptId: 'builtin-standard' },
     effectiveRoute: { provider: 'p1', model: 'm1', from: 'harness' },
     reports: [report],
+    thread: [{ kind: 'review', id: 't1', at: Date.now(), reportId: 'r1', label: '第 3 轮 · 对话和文件 · 深入 · 标准审查', provider: 'p1', model: 'm1' }],
     ...over,
   }
 }
@@ -66,6 +67,14 @@ beforeEach(() => {
     const bare = path.split('?')[0]!
     if (init?.method === 'POST') posts.push({ path: bare, body: JSON.parse(String(init.body)) as Record<string, unknown> })
     if (bare === '/review') return new Response(`data: ${JSON.stringify({ type: 'done', report: reviewAnswer })}\n\n`, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+    if (bare === '/chat') {
+      const body = JSON.parse(String(init!.body)) as { text: string }
+      const user = { kind: 'chat' as const, id: `u${current.thread.length}`, at: Date.now(), role: 'user' as const, text: body.text }
+      const reply = { kind: 'chat' as const, id: `a${current.thread.length}`, at: Date.now(), role: 'reviewer' as const, text: '第 1 条成立：npm test 输出 2 failed。', provider: 'p1', model: 'm1' }
+      current = { ...current, thread: [...current.thread, user, reply] }
+      const frames = [{ type: 'phase', phase: '等待审查模型回答' }, { type: 'delta', text: '第 1 条成立' }, { type: 'done', entry: reply }]
+      return new Response(frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } })
+    }
     const value =
       bare === '/state' ? current
       : bare === '/models' ? { groups: [{ id: 'p1', name: 'P One', models: [{ id: 'm1', name: 'Model One' }] }] }
@@ -192,6 +201,59 @@ describe('the review pane', () => {
     current = state({ reports: [] })
     render(<ReviewPane sessionId="s1" />)
     await screen.findByText(/还没有审查报告/)
+  })
+})
+
+describe('the discussion with the reviewer', () => {
+  it('the latest report opens it; a question gets the reply, which can go into the input box', async () => {
+    const drafts: string[] = []
+    const undo = registerComposer('s1', { setDraft: (text) => drafts.push(text), draft: () => '' })
+    const { container } = render(<ReviewPane sessionId="s1" />)
+    fireEvent.click(await screen.findByRole('button', { name: /和审查 AI 讨论/ }))
+    expect(screen.getByRole('button', { name: '讨论' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText(/审查 · 第 3 轮 · 对话和文件 · 深入 · 标准审查 · 有问题 · 2 个问题/)).toBeTruthy()
+    const box = screen.getByRole('textbox', { name: '对审查模型说' })
+    fireEvent.change(box, { target: { value: '第 1 条是不是误报？' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(lastPost('/chat')?.body).toMatchObject({ session: 's1', text: '第 1 条是不是误报？' }))
+    await screen.findByText('第 1 条成立：npm test 输出 2 failed。')
+    expect(screen.getByText('第 1 条是不是误报？')).toBeTruthy()
+    fireEvent.click(within(container.querySelector('.rv-chat-reply')!).getByRole('button', { name: /放进输入框/ }))
+    expect(drafts).toEqual(['第 1 条成立：npm test 输出 2 failed。'])
+    expect(posts.filter((post) => post.path === '/send')).toHaveLength(0)
+    // The review entry goes back to its report.
+    fireEvent.click(screen.getByRole('button', { name: /审查 · 第 3 轮/ }))
+    expect(screen.getByRole('button', { name: '审查' }).getAttribute('aria-pressed')).toBe('true')
+    expect(marks(container)).toBe(0)
+    undo()
+  })
+
+  it('Shift+Enter does not send; a fresh start clears the memory after asking', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<ReviewPane sessionId="s1" />)
+    fireEvent.click(await screen.findByRole('button', { name: '讨论' }))
+    const box = screen.getByRole('textbox', { name: '对审查模型说' })
+    fireEvent.change(box, { target: { value: '换行' } })
+    fireEvent.keyDown(box, { key: 'Enter', shiftKey: true })
+    expect(lastPost('/chat')).toBeUndefined()
+    fireEvent.click(screen.getByRole('button', { name: /重新开始/ }))
+    await waitFor(() => expect(lastPost('/thread/reset')?.body).toEqual({ session: 's1' }))
+    expect(confirm).toHaveBeenCalled()
+    confirm.mockRestore()
+  })
+
+  it('the shield menu opens it in the panel', async () => {
+    const { container } = render(
+      <>
+        <ShieldButton sessionId="s1" />
+        <ReviewPane sessionId="s1" />
+      </>,
+    )
+    await screen.findByText('测试没有通过')
+    fireEvent.contextMenu(container.querySelector('.rv-shield-btn')!)
+    fireEvent.click(within(screen.getByRole('menu', { name: '任务审查' })).getByRole('menuitem', { name: /和审查 AI 讨论/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '讨论' }).getAttribute('aria-pressed')).toBe('true'))
+    expect(screen.getByRole('textbox', { name: '对审查模型说' })).toBeTruthy()
   })
 })
 

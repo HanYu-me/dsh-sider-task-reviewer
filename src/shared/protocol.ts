@@ -237,6 +237,50 @@ export interface Running {
   tools: ReviewToolUse[]
 }
 
+/**
+ * One step of the reviewer's own conversation about a working conversation:
+ * every review of it, and what the user and the reviewer said about them.
+ * Later reviews and the discussion are sent with this history, so the
+ * reviewer stays consistent from one review to the next.
+ */
+export type ThreadEntry =
+  | {
+      kind: 'review'
+      id: string
+      at: number
+      reportId: string
+      /** What was reviewed, for people: "第 3 轮 · 对话和文件 · 深入". */
+      label: string
+      provider: string
+      model: string
+    }
+  | {
+      kind: 'chat'
+      id: string
+      at: number
+      role: 'user' | 'reviewer'
+      text: string
+      provider?: string
+      model?: string
+      tools?: ReviewToolUse[]
+      notes?: string[]
+    }
+
+/** Body of POST /chat. */
+export interface ChatRequest {
+  session: string
+  text: string
+  route?: ModelRoute
+}
+
+/** Events streamed by POST /chat (server-sent events, `data:` JSON lines). */
+export type ChatStreamEvent =
+  | { type: 'phase'; phase: string }
+  | { type: 'delta'; text: string }
+  | { type: 'tool'; tool: ReviewToolUse }
+  | { type: 'done'; entry: ThreadEntry }
+  | { type: 'error'; message: string }
+
 /** Everything the panel needs for one conversation. */
 export interface SessionState {
   sessionId: string
@@ -253,6 +297,10 @@ export interface SessionState {
   running?: Running
   loop?: LoopState
   reports: Report[]
+  /** The reviewer's conversation about this conversation, oldest first. */
+  thread: ThreadEntry[]
+  /** A reply of the reviewer being written in the discussion. */
+  chatting?: Running
   /** The last error of a review that did not finish. */
   error?: string
 }

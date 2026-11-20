@@ -29,6 +29,10 @@ export interface RunInput {
   depth: ReviewDepth
   system: string
   prompt: string
+  /** What to say when the model thought its budget away (default: answer with the JSON conclusion). */
+  answerNow?: string
+  /** What to say when the tool budget is spent. */
+  finishNow?: string
   /** Where the deep tools may look: the working directory first, then the repositories of the written files. */
   roots?: readonly string[]
   /** Reasoning effort id for the route, when one was picked. */
@@ -153,6 +157,8 @@ export async function runReview(input: RunInput): Promise<RunOutput> {
     ...(input.effort !== undefined ? { reasoningEffort: input.effort as GenerateOptions['reasoningEffort'] } : {}),
   }
   const first: RequestMessage = { role: 'user', content: [{ type: 'text', text: input.prompt }] }
+  const answerNow = input.answerNow ?? ANSWER_NOW
+  const finishNow = input.finishNow ?? FINISH_NOW
   try {
     const quick = async (): Promise<RunOutput> => {
       input.onPhase?.('等待审查模型回答')
@@ -161,7 +167,7 @@ export async function runReview(input: RunInput): Promise<RunOutput> {
       if (result.finish.kind === 'max-tokens' && textOfBlocks(result.blocks) === '') {
         notes.push('审查模型第一次思考用完了输出长度，已加大额度重试')
         input.onPhase?.('审查模型没写出结论，重试中')
-        result = await streamOnce(input, { ...base, maxTokens: Math.min(input.maxTokens * 2, 64_000), messages: [first, { role: 'user', content: [{ type: 'text', text: ANSWER_NOW }] }] }, controller.signal)
+        result = await streamOnce(input, { ...base, maxTokens: Math.min(input.maxTokens * 2, 64_000), messages: [first, { role: 'user', content: [{ type: 'text', text: answerNow }] }] }, controller.signal)
       }
       const problem = describeFinish(result.finish)
       const text = textOfBlocks(result.blocks)
@@ -207,7 +213,7 @@ export async function runReview(input: RunInput): Promise<RunOutput> {
         if (text === '' && result.finish.kind === 'max-tokens' && !nudged) {
           nudged = true
           notes.push('审查模型思考用完了输出长度，已提示它直接给结论')
-          messages.push({ role: 'user', content: [{ type: 'text', text: ANSWER_NOW }] })
+          messages.push({ role: 'user', content: [{ type: 'text', text: answerNow }] })
           continue
         }
         if (problem !== undefined && text === '') throw new ReviewError(`审查模型出错：${problem}`, 'upstream')
@@ -220,7 +226,7 @@ export async function runReview(input: RunInput): Promise<RunOutput> {
         let text: string
         let ok: boolean
         if (calls >= input.maxToolCalls) {
-          text = FINISH_NOW
+          text = finishNow
           ok = false
         } else {
           calls += 1
@@ -236,7 +242,7 @@ export async function runReview(input: RunInput): Promise<RunOutput> {
         }
         messages.push(createToolResultMessage({ callId: call.id, content: [{ type: 'text', text }], isError: !ok }))
       }
-      if (calls >= input.maxToolCalls) messages.push({ role: 'user', content: [{ type: 'text', text: FINISH_NOW }] })
+      if (calls >= input.maxToolCalls) messages.push({ role: 'user', content: [{ type: 'text', text: finishNow }] })
     }
     throw new ReviewError('审查模型一直在调用工具，没有给出结论', 'loop')
   } catch (error) {

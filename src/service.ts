@@ -11,14 +11,17 @@
  * - sends findings back only when asked (or when a continuous review the user
  *   started does it);
  * - keeps the review prompts (the built-in one, editable and resettable, and
- *   the user's own).
+ *   the user's own);
+ * - keeps the reviewer's own conversation about each conversation: every
+ *   review is sent with the earlier ones (their conclusions) and the
+ *   discussion, and the user can discuss the reviews with the reviewer.
  * @module dsh-sider-task-reviewer/service
  */
 import { randomUUID } from 'node:crypto'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { filesSection, reviewRoots, touchedFiles } from './files'
 import { parseReview } from './parse'
-import { BUILTIN_PROMPTS, systemPrompt, userPrompt } from './prompt'
+import { BUILTIN_PROMPTS, CHAT_ANSWER_NOW, CHAT_FINISH_NOW, chatSystemPrompt, systemPrompt, userPrompt } from './prompt'
 import { addCounts, redact, redactionNote } from './redact'
 import { ReviewError, runReview, type LlmStreamFace } from './runner'
 import { messageFor, openFindings } from './shared/message'
@@ -29,6 +32,7 @@ import type {
   LoopState,
   ModelCatalog,
   ModelEfforts,
+  ChatStreamEvent,
   ModelRoute,
   Report,
   ReviewContent,
@@ -41,8 +45,10 @@ import type {
   SendResult,
   SessionSettings,
   SessionState,
+  ThreadEntry,
 } from './shared/protocol'
 import { clampRounds, MAX_PROMPT_CHARS, MAX_PROMPTS, reportMarkdown, type ReviewStore } from './store'
+import { chatEntry, historyBlock, latestReview, threadView, withChat, withReview } from './thread'
 import { fitTurns, renderBackground, selectTurns, turnsOf, type LogEvent } from './transcript'
 import { workspaceOverview } from './workspace'
 
@@ -101,6 +107,10 @@ export interface ServiceConfig {
   loopWaitMs: number
   /** Pause after the working agent's turn ends before the next round looks (it may queue another turn). */
   loopSettleMs: number
+  /** Characters of the reviewer's earlier reviews and discussion sent with a call (besides the newest review's material). */
+  historyChars: number
+  /** Read-only tool calls the reviewer may make for one reply in the discussion. */
+  chatToolCalls: number
 }
 
 export const DEFAULT_CONFIG: ServiceConfig = {
@@ -113,6 +123,8 @@ export const DEFAULT_CONFIG: ServiceConfig = {
   liveMinGapMs: 45_000,
   loopWaitMs: 45 * 60_000,
   loopSettleMs: 1500,
+  historyChars: 40_000,
+  chatToolCalls: 8,
 }
 
 interface Job {
@@ -120,6 +132,11 @@ interface Job {
   controller: AbortController
   listeners: Set<(event: ReviewStreamEvent) => void>
   done: Promise<Report>
+}
+
+interface ChatJob {
+  running: Running
+  controller: AbortController
 }
 
 interface LiveWatch {
@@ -170,6 +187,7 @@ function findingsDigest(report: Report): string {
 
 export class ReviewService {
   private readonly jobs = new Map<string, Job>()
+  private readonly chats = new Map<string, ChatJob>()
   private readonly watches = new Map<string, LiveWatch>()
   private readonly loops = new Map<string, LoopRun>()
   private readonly errors = new Map<string, string>()
@@ -343,6 +361,7 @@ export class ReviewService {
     const global = await this.store.loadGlobal()
     const effective = await this.routeFor(sessionId)
     const loop = this.loops.get(sessionId)
+    const chat = this.chats.get(sessionId)
     return {
       sessionId,
       global,
@@ -355,6 +374,8 @@ export class ReviewService {
       ...(job !== undefined ? { running: { ...job.running, tools: [...job.running.tools] } } : {}),
       ...(loop !== undefined ? { loop: { ...loop.state, rounds: loop.state.rounds.map((item) => ({ ...item })) } } : {}),
       reports: file.reports,
+      thread: threadView(file.thread),
+      ...(chat !== undefined ? { chatting: { ...chat.running, tools: [...chat.running.tools] } } : {}),
       ...(error !== undefined ? { error } : {}),
     }
   }
@@ -537,13 +558,20 @@ export class ReviewService {
     })
     const working = this.sessionRoute(sessionId)
     if (working !== undefined && working.provider === route.provider && working.model === route.model) notes.push('审查模型和执行者是同一个模型，换一个不同的模型更容易发现问题')
+    // The reviewer's earlier reviews of this conversation (their conclusions) and the discussion of them.
+    const saved = await this.store.load(sessionId)
+    const history = historyBlock(saved.thread, saved.reports, { keepLatestMaterial: false, budget: this.config.historyChars })
+    if (history.reviews > 0 || history.chats > 0) {
+      notes.push(`审查模型带着之前的 ${history.reviews} 次审查${history.chats > 0 ? `和 ${history.chats} 段讨论` : ''}${history.dropped > 0 ? `（更早的 ${history.dropped} 段已省略）` : ''}`)
+    }
 
     const out = await runReview({
       llm: this.faces.llm()!,
       route,
       depth,
-      system: systemPrompt({ checks: prompt.text, depth, content, live: trigger === 'live', loop: extras.loop !== undefined && extras.loop.round > 1, maxToolCalls: this.config.maxToolCalls }),
-      prompt: promptText,
+      system: systemPrompt({ checks: prompt.text, depth, content, live: trigger === 'live', loop: extras.loop !== undefined && extras.loop.round > 1, maxToolCalls: this.config.maxToolCalls, thread: history.text !== '' }),
+      // The record first, then this review's request; the thread keeps the request alone.
+      prompt: history.text !== '' ? `${history.text}\n\n# 这次的审查\n\n${promptText}` : promptText,
       roots,
       ...(route.effort !== undefined ? { effort: route.effort } : {}),
       maxToolCalls: this.config.maxToolCalls,
@@ -587,7 +615,109 @@ export class ReviewService {
     }
     if (this.disposed) return report
     await this.store.addReport(report)
+    await this.store.updateThread(sessionId, (thread) => withReview(thread, report, promptText, roots))
     return report
+  }
+
+  // ---------------------------------------------------------------- discussion
+
+  /**
+   * One message of the user to the reviewer about its reviews of a
+   * conversation. The reviewer answers with the reviews (the newest with the
+   * material it was given) and the discussion so far; it may look at files
+   * with the read-only tools. The exchange is kept only when it worked.
+   * @returns the reviewer's reply.
+   */
+  async chat(sessionId: string, text: string, routeOverride?: ModelRoute, listener?: (event: ChatStreamEvent) => void): Promise<ThreadEntry> {
+    const message = text.trim()
+    if (message === '') throw new ReviewError('没有要说的内容', 'empty')
+    if (message.length > 20_000) throw new ReviewError('这段话太长了（最多 20000 字）', 'too-large')
+    if (this.chats.has(sessionId)) throw new ReviewError('审查模型还在回答上一条', 'busy')
+    const llm = this.faces.llm()
+    if (llm === undefined) throw new ReviewError('DSH 的模型服务不可用', 'no-llm')
+    const found = await this.routeFor(sessionId, routeOverride)
+    if (found === undefined) throw new ReviewError('没有可用的审查模型：请在面板里选一个', 'no-route')
+    const route: ModelRoute = { provider: found.provider, model: found.model, ...(found.effort !== undefined ? { effort: found.effort } : {}) }
+    const prompt = await this.promptFor((await this.store.loadGlobal()).activePromptId)
+    const controller = new AbortController()
+    const job: ChatJob = { running: { id: randomUUID(), trigger: 'manual', startedAt: Date.now(), phase: '整理审查记录', text: '', tools: [] }, controller }
+    this.chats.set(sessionId, job)
+    const emit = (event: ChatStreamEvent): void => {
+      if (event.type === 'phase') job.running.phase = event.phase
+      else if (event.type === 'delta') job.running.text = (job.running.text + event.text).slice(-4000)
+      else if (event.type === 'tool') job.running.tools.push(event.tool)
+      try {
+        listener?.(event)
+      } catch {
+        // A closed page must not stop the reply.
+      }
+    }
+    try {
+      let file = await this.store.load(sessionId)
+      // The newest report may not be in the reviewer's conversation (made before it existed, or after a fresh start): add its conclusion.
+      const newest = file.reports[0]
+      if (newest !== undefined && !(file.thread?.entries ?? []).some((entry) => entry.kind === 'review' && entry.reportId === newest.id)) {
+        await this.store.updateThread(sessionId, (thread) => withReview(thread, newest, undefined, []))
+        file = await this.store.load(sessionId)
+      }
+      const history = historyBlock(file.thread, file.reports, { keepLatestMaterial: true, budget: this.config.historyChars })
+      const latest = latestReview(file.thread)
+      let roots = latest?.roots ?? []
+      if (roots.length === 0) {
+        const cwd = this.faces.session(sessionId)?.header?.cwd
+        if (cwd !== undefined) roots = await reviewRoots(cwd, [])
+      }
+      const cleaned = redact(message)
+      const out = await runReview({
+        llm,
+        route,
+        depth: roots.length > 0 ? 'deep' : 'quick',
+        system: chatSystemPrompt({ checks: prompt.text, tools: roots.length > 0, maxToolCalls: this.config.chatToolCalls }),
+        prompt: `${history.text !== '' ? history.text : '（还没有审查过这个对话。）'}\n\n# 用户现在对你说\n\n${cleaned.text}`,
+        roots,
+        ...(route.effort !== undefined ? { effort: route.effort } : {}),
+        maxToolCalls: this.config.chatToolCalls,
+        maxTokens: this.config.maxTokens,
+        timeoutMs: this.config.deepTimeoutMs,
+        signal: controller.signal,
+        answerNow: CHAT_ANSWER_NOW,
+        finishNow: CHAT_FINISH_NOW,
+        onPhase: (phase) => emit({ type: 'phase', phase }),
+        onDelta: (delta) => emit({ type: 'delta', text: delta }),
+        onTool: (tool) => emit({ type: 'tool', tool }),
+      })
+      const notes = [...out.notes]
+      const counts: Record<string, number> = {}
+      addCounts(counts, cleaned.counts)
+      addCounts(counts, out.redactions)
+      const note = redactionNote(counts)
+      if (note !== undefined) notes.push(note)
+      if (history.dropped > 0) notes.push(`更早的 ${history.dropped} 段审查和讨论没有带上`)
+      const reply = chatEntry('reviewer', out.text, { provider: route.provider, model: route.model, ...(out.tools.length > 0 ? { tools: out.tools } : {}), ...(notes.length > 0 ? { notes } : {}) })
+      if (!this.disposed) await this.store.updateThread(sessionId, (thread) => withChat(thread, chatEntry('user', message), reply))
+      const [entry] = threadView({ startedAt: 0, entries: [reply] })
+      emit({ type: 'done', entry: entry! })
+      return entry!
+    } catch (error) {
+      const failure = error instanceof Error ? error.message : String(error)
+      emit({ type: 'error', message: failure })
+      throw error instanceof ReviewError ? error : new ReviewError(failure)
+    } finally {
+      if (this.chats.get(sessionId) === job) this.chats.delete(sessionId)
+    }
+  }
+
+  cancelChat(sessionId: string): boolean {
+    const job = this.chats.get(sessionId)
+    if (job === undefined) return false
+    job.controller.abort()
+    return true
+  }
+
+  /** Start the reviewer's conversation about a conversation afresh (the reports stay). */
+  async resetThread(sessionId: string): Promise<void> {
+    this.cancelChat(sessionId)
+    await this.store.updateThread(sessionId, () => undefined)
   }
 
   async dismiss(sessionId: string, reportId: string, index: number, dismissed: boolean): Promise<Report | undefined> {
@@ -842,6 +972,7 @@ export class ReviewService {
   dispose(): void {
     this.disposed = true
     for (const job of this.jobs.values()) job.controller.abort()
+    for (const job of this.chats.values()) job.controller.abort()
     for (const sessionId of [...this.watches.keys()]) this.stopWatch(sessionId)
     for (const run of this.loops.values()) if (run.timer !== undefined) clearTimeout(run.timer)
   }

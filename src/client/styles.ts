@@ -43,6 +43,9 @@ export const CSS = `
 .rv-scroll { flex: 1; min-height: 0; overflow: auto; padding: 12px 12px 40px; scrollbar-width: thin; }
 .rv-head { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
 .rv-head h2 { margin: 0; font-size: 14px; font-weight: 650; }
+.rv-head h2, .rv-head > .rv-verdict, .rv-views button { white-space: nowrap; }
+/* A narrow sidebar: the verdict pill gives way to the view switch (the shield's dot and the report still show it). */
+@container rv (max-width: 400px) { .rv-head > .rv-verdict { display: none; } .rv-views button { padding: 0 7px; } }
 .rv-head .rv-spacer { flex: 1; }
 .rv-hint { color: var(--rv-fg-3); font-size: 12px; }
 .rv-mono { font-family: var(--rv-mono); font-size: 11.5px; }
@@ -182,6 +185,24 @@ export const CSS = `
   .rv-label { width: 44px; }
   .rv-seg button { padding: 0 7px; }
 }
+/* The discussion with the reviewer. */
+.rv-chat { display: flex; flex-direction: column; gap: 10px; }
+.rv-chat-intro { display: flex; flex-direction: column; gap: 6px; }
+.rv-chat-intro p { margin: 0; }
+.rv-chat-list { display: flex; flex-direction: column; gap: 10px; }
+.rv-chat-review { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 10px; border: 1px dashed var(--rv-border-2); border-radius: var(--rv-r-sm);
+  background: transparent; color: var(--rv-fg-2); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.rv-chat-review:hover:not(:disabled) { background: var(--rv-hover); }
+.rv-chat-review:disabled { cursor: default; opacity: .7; }
+.rv-chat-user { display: flex; justify-content: flex-end; }
+.rv-chat-bubble { max-width: 88%; padding: 7px 11px; border-radius: 12px 12px 4px 12px; background: var(--rv-sunk-2); white-space: pre-wrap; word-break: break-word; }
+.rv-chat-reply { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--rv-border); border-radius: var(--rv-r-md); background: var(--rv-surface); }
+.rv-chat-reply.is-pending { border-color: color-mix(in srgb, var(--rv-busy) 40%, var(--rv-border)); }
+.rv-chat-text { white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+.rv-chat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 2px; }
+.rv-chat-compose { position: sticky; bottom: 0; margin: 0 -12px; padding: 8px 12px 10px; background: var(--rv-surface); border-top: 1px solid var(--rv-border); }
+.rv-chat-compose .rv-textarea { margin-top: 0; resize: none; max-height: 40vh; }
+
 @media (prefers-reduced-motion: reduce) { .rv-root *, .rv-shield * { animation: none !important; } }
 `
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3 — 2026-11-20
+
+- **Reviews of one conversation remember each other.** Every review of a conversation (manual, shield, live, continuous) and the discussion about them go into one record per conversation. Each new review is sent with it: earlier reviews as their conclusions (with what the user did with the findings: waved away, sent to the main conversation), the newest with the material it was given, and the discussion. The reviewer is told to stay consistent: do not report what was fixed again, correct an earlier mistake, take what the user said into account. The record is cut from the oldest end to about 40,000 characters. It goes into the request as one block of text, not as earlier messages, so agent-style providers (dsh-agy-link rebuilds or drops earlier messages by its own rules) read it like every other provider.
+- **Discuss a review with the reviewer.** A 「讨论」 view in the panel, a 「和审查 AI 讨论」 button on the latest report and an entry in the shield's menu. The reviewer answers with the record (the newest review with its material) and may look at files with the read-only tools (at most 8 calls); it is told it cannot change files or run commands and to write what the main conversation should do as a message for it. A reply can go into the input box or be sent directly. A message that got no answer is not kept. 「重新开始」 clears the record; the reports stay.
+- The panel header stays on one line in a narrow sidebar (the verdict pill gives way under 400px).
+- New routes: `POST /chat`, `POST /chat/cancel`, `POST /thread/reset`; the state carries the record (`thread`) and a reply being written (`chatting`).
+
 ## 0.1.2 — 2026-11-20
 
 - **Reviews with Antigravity (Gemini through the agy CLI) work.** They used to end with "审查模型没有给出回答": dsh-agy-link dropped the system prompt and stopped at agy's first tool step, and it ran agy with the user's own permission mode. The system prompt now carries the `REVIEW_POLICY` marker (the word DSH's auto-review plugin uses). dsh-agy-link recognises it, forwards the review instructions, runs agy in its read-only plan mode, and lets it answer. Antigravity pins review calls to low reasoning effort.
