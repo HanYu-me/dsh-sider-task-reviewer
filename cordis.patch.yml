@@ -1,0 +1,8 @@
+# dsh-sider-task-reviewer bundle patch: inserts the reviewer row into the
+# profile roster. The host half (exports ".") reads the live session log,
+# runs reviews through the llm service and serves /sider-task-reviewer/*;
+# the browser half (lib/client.js) adds the right-sidebar 「审查」 tab and the
+# shield button beside the composer.
+- insert:
+    - id: sider-task-reviewer
+      name: dsh-sider-task-reviewer

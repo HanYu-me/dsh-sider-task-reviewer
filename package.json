@@ -1,0 +1,89 @@
+{
+  "name": "dsh-sider-task-reviewer",
+  "description": "Sider Task Reviewer for the DeepSeek Harness (dsh): another model of your choice reviews the task the current conversation is doing or has done — the conversation, the files it wrote, or both; quick or deep (read-only file and git tools). Findings come with evidence and are saved per conversation. A shield beside the input box puts the suggestions into the composer; continuous review sends them to the working model and re-reviews its fix until it passes; built-in prompts for work, derivations, literature surveys and plans.",
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./src/client/index.tsx",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.2.0-rc.1 <0.3.0"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "react-dom"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": ">=0.2.0-rc.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-agent": "^0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "^0.2.1-rc.2",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.20.0",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.1",
+    "esbuild": "~0.25.0",
+    "jsdom": "^29.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "~5.7.2",
+    "vitest": "^3.0.0"
+  },
+  "files": [
+    "lib/**/*.js",
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "license": "Apache-2.0",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "review",
+    "audit",
+    "second-opinion"
+  ],
+  "scripts": {
+    "build": "tsc -p . && node scripts/build.mjs",
+    "typecheck": "tsc -p . --pretty false",
+    "test": "vitest run"
+  },
+  "author": "Yu Han",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HanYu-me/dsh-sider-task-reviewer.git"
+  }
+}
